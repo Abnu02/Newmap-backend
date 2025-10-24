@@ -99,10 +99,64 @@ db.serialize(() => {
     FOREIGN KEY (employeeId) REFERENCES employees (id)
   )`);
 
-  // Insert sample data
+  // Managers table
+  db.run(`CREATE TABLE IF NOT EXISTS managers (
+    id TEXT PRIMARY KEY,
+    fullName TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    company TEXT,
+    tenantId TEXT,
+    role TEXT DEFAULT 'manager',
+    active BOOLEAN DEFAULT 1,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`, (err) => {
+    if (err) {
+      console.error('Error creating managers table:', err);
+      return;
+    }
+
+    // Insert default admin and manager accounts
+    const adminPassword = bcrypt.hashSync('admin123', 12);
+    const managerPassword = bcrypt.hashSync('manager123', 12);
+    const supervisorPassword = bcrypt.hashSync('supervisor123', 12);
+    
+    db.run(`INSERT OR IGNORE INTO managers (id, fullName, email, password, company, tenantId, role) VALUES 
+      ('MGR001', 'Admin Manager', 'admin@company.com', ?, 'Company Name', 'tenant1', 'admin'),
+      ('MGR002', 'John Manager', 'manager@company.com', ?, 'Company Name', 'tenant1', 'manager'),
+      ('MGR003', 'Jane Supervisor', 'supervisor@company.com', ?, 'Company Name', 'tenant1', 'supervisor')`,
+      [adminPassword, managerPassword, supervisorPassword],
+      (err) => {
+        if (err) {
+          console.error('Error inserting managers:', err);
+        } else {
+          console.log('✅ Manager accounts ready:');
+          console.log('   - Admin: admin@company.com / admin123');
+          console.log('   - Manager: manager@company.com / manager123');
+          console.log('   - Supervisor: supervisor@company.com / supervisor123');
+        }
+      }
+    );
+  });
+
+  // Insert sample employee data
   db.run(`INSERT OR IGNORE INTO employees (id, fullName, department, avatarUrl, tenantId) VALUES 
     ('EMP001', 'Sarah Johnson', 'Field Operations', 'https://images.unsplash.com/photo-1702089050621-62646a2b748f', 'tenant1'),
-    ('EMP-001', 'John Doe', 'Sales', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d', 'tenant1')`);
+    ('EMP-001', 'John Doe', 'Sales', 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d', 'tenant1'),
+    ('EMP002', 'Michael Chen', 'Field Operations', 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d', 'tenant1'),
+    ('EMP003', 'Emily Davis', 'Customer Service', 'https://images.unsplash.com/photo-1494790108377-be9c29b29330', 'tenant1'),
+    ('EMP004', 'James Wilson', 'Logistics', 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e', 'tenant1'),
+    ('EMP005', 'Lisa Anderson', 'Sales', 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80', 'tenant1'),
+    ('EMP006', 'Robert Martinez', 'Field Operations', 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e', 'tenant1'),
+    ('EMP007', 'Amanda Taylor', 'Customer Service', 'https://images.unsplash.com/photo-1544005313-94ddf0286df2', 'tenant1')`,
+    (err) => {
+      if (err) {
+        console.error('Error inserting sample employees:', err);
+      } else {
+        console.log('✅ Sample employee data inserted');
+      }
+    }
+  );
 });
 
 // Authentication middleware
@@ -128,6 +182,59 @@ const authenticateToken = (req, res, next) => {
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Manager login
+app.post('/auth/manager/login', (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Email and password are required' });
+  }
+
+  // Find manager by email
+  db.get('SELECT * FROM managers WHERE email = ? AND active = 1', [email], (err, manager) => {
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
+
+    if (!manager) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Verify password
+    bcrypt.compare(password, manager.password, (err, isMatch) => {
+      if (err) {
+        console.error('Password comparison error:', err);
+        return res.status(500).json({ error: 'Authentication error' });
+      }
+
+      if (!isMatch) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+      }
+
+      // Generate JWT token
+      const token = jwt.sign(
+        { 
+          managerId: manager.id,
+          email: manager.email,
+          role: manager.role,
+          type: 'manager'
+        },
+        JWT_SECRET,
+        { expiresIn: '24h' }
+      );
+
+      // Return manager info without password
+      const { password: _, ...managerData } = manager;
+
+      res.json({
+        token: token,
+        manager: managerData
+      });
+    });
+  });
 });
 
 // Device authentication
