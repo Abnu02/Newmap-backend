@@ -14,7 +14,7 @@ yarn-error.log*
 # Database
 *.db
 *.db-journal
-dev.db*
+# dev.db*
 
 # Logs
 logs/
